@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -10,8 +11,10 @@ import (
 )
 
 type config struct {
-	Previous string
-	Next     string
+	locationService *pokedex.LocationApi
+	Previous        string
+	Next            string
+	Parameters      []string
 }
 
 type cliCommand struct {
@@ -25,7 +28,7 @@ var commandRegistry = map[string]cliCommand{}
 func main() {
 	registerCommands()
 
-	cfg := config{}
+	cfg := NewConfig()
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
@@ -43,6 +46,7 @@ func main() {
 
 		fields := strings.Fields(input)
 		commandName := fields[0]
+		cfg.Parameters = fields[1:]
 
 		command, ok := commandRegistry[commandName]
 		if !ok {
@@ -50,11 +54,18 @@ func main() {
 			continue
 		}
 
-		err := command.callback(&cfg)
+		err := command.callback(cfg)
 		if err != nil {
 			_ = fmt.Errorf("something went wrong: %v", err)
 		}
 	}
+}
+
+func NewConfig() *config {
+	cfg := &config{
+		locationService: pokedex.NewLocationApi(),
+	}
+	return cfg
 }
 
 func registerCommands() {
@@ -81,6 +92,12 @@ func registerCommands() {
 		name:        "mapb",
 		description: "Display the previous 20 location areas, if any",
 		callback:    commandMapBack,
+	}
+
+	commandRegistry["explore"] = cliCommand{
+		name:        "explore",
+		description: "Explore a given location area",
+		callback:    commandExplore,
 	}
 }
 
@@ -117,7 +134,7 @@ func commandMap(cfg *config) error {
 	if cfg.Next != "" {
 		url = cfg.Next
 	}
-	locationArea, err := pokedex.GetLocation(url)
+	locationArea, err := cfg.locationService.GetLocationArea(url)
 	if err != nil {
 		return err
 	}
@@ -138,7 +155,7 @@ func commandMapBack(cfg *config) error {
 		return nil
 	}
 	url := cfg.Previous
-	locationArea, err := pokedex.GetLocation(url)
+	locationArea, err := cfg.locationService.GetLocationArea(url)
 	if err != nil {
 		return err
 	}
@@ -148,6 +165,29 @@ func commandMapBack(cfg *config) error {
 
 	for _, area := range locationArea.Results {
 		fmt.Println(area.Name)
+	}
+
+	return nil
+}
+
+func commandExplore(cfg *config) error {
+	if len(cfg.Parameters) == 0 {
+		return errors.New("please type a location name")
+	}
+	fmt.Printf("Exploring %s...\n", cfg.Parameters[0])
+	locationSingleArea, err := cfg.locationService.GetSingleLocationArea(cfg.Parameters[0])
+	if err != nil {
+		return err
+	}
+
+	if len(locationSingleArea.PokemonEncounters) == 0 {
+		fmt.Println("No pokemon found!")
+		return nil
+	}
+
+	fmt.Println("Found Pokemon:")
+	for _, pokemonEnc := range locationSingleArea.PokemonEncounters {
+		fmt.Printf("- %s\n", pokemonEnc.Pokemon.Name)
 	}
 
 	return nil
